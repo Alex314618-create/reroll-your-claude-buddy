@@ -15,6 +15,7 @@ import { MESSAGES } from "./messages.js";
 
 const DEFAULT_WORKERS = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
 const LOCALE_KEY = "claude_buddy_locale";
+const PORTABLE_API_TOKEN = window.__CLAUDE_BUDDY_API_TOKEN__ || "";
 
 const state = {
   locale: chooseInitialLocale(),
@@ -34,6 +35,7 @@ const state = {
   results: [],
   seenIds: new Set(),
   selectedUserId: null,
+  isApplying: false,
   workers: [],
   searchWorkerCount: 0,
   isSearching: false,
@@ -213,7 +215,7 @@ function uiText(key) {
 }
 
 function primaryApplyButtonText() {
-  return t("apply.apply_selected");
+  return state.isApplying ? t("apply.applying") : t("apply.apply_selected");
 }
 
 function secondaryApplyButtonText() {
@@ -223,6 +225,17 @@ function secondaryApplyButtonText() {
 function updateApplyButtons() {
   copyPowerShellButton.textContent = primaryApplyButtonText();
   copyNodeButton.textContent = secondaryApplyButtonText();
+}
+
+function portableApiHeaders({ json = false } = {}) {
+  const headers = {};
+  if (PORTABLE_API_TOKEN) {
+    headers["X-ClaudeBuddy-Token"] = PORTABLE_API_TOKEN;
+  }
+  if (json) {
+    headers["Content-Type"] = "application/json";
+  }
+  return headers;
 }
 
 function showView(viewName) {
@@ -536,7 +549,7 @@ function startPortablePing() {
   }
 
   state.pingTimer = window.setInterval(() => {
-    fetch("/api/ping", { cache: "no-store" }).catch(() => {});
+    fetch("/api/ping", { cache: "no-store", headers: portableApiHeaders() }).catch(() => {});
   }, 15000);
 }
 
@@ -548,7 +561,7 @@ async function refreshConfigStatus() {
   }
 
   try {
-    const response = await fetch("/api/config/status", { cache: "no-store" });
+    const response = await fetch("/api/config/status", { cache: "no-store", headers: portableApiHeaders() });
     if (!response.ok) {
       throw new Error("status unavailable");
     }
@@ -797,7 +810,7 @@ function renderSelectedSummary() {
     </div>
   `;
 
-  copyPowerShellButton.disabled = false;
+  copyPowerShellButton.disabled = state.isApplying;
   copyNodeButton.disabled = false;
   updateApplyButtons();
 }
@@ -1041,12 +1054,18 @@ async function applySelectedBuddy() {
     return;
   }
 
+  if (state.isApplying) {
+    return;
+  }
+
+  state.isApplying = true;
+  updateApplyButtons();
+  copyPowerShellButton.disabled = true;
+
   try {
     const response = await fetch("/api/apply", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: portableApiHeaders({ json: true }),
       body: JSON.stringify({
         userId: selected.userId,
         backup: document.querySelector("#backupInput").checked,
@@ -1065,6 +1084,9 @@ async function applySelectedBuddy() {
     renderConfigLog(formatMessage("status.applied", { userId: selected.userId }));
   } catch (error) {
     renderConfigLog(error instanceof Error ? error.message : t("status.apply_failed"), true);
+  } finally {
+    state.isApplying = false;
+    renderSelectedSummary();
   }
 }
 

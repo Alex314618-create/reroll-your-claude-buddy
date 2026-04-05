@@ -16,9 +16,9 @@ import { buildSequentialId, calculateLocalLimit, getEffectiveWorkerCount } from 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
+const buildPortableExe = path.join(projectRoot, "build", "cargo-target", "release", "claude_buddy_portable.exe");
 const distDir = path.join(projectRoot, "dist");
 const rootPortableExe = path.join(projectRoot, "ClaudeBuddyLocalPortable.exe");
-const distPortableExe = path.join(distDir, "ClaudeBuddyLocalPortable.exe");
 const distPortableZip = path.join(distDir, "ClaudeBuddyLocalPortable.zip");
 const tests = [];
 let portableBuilt = false;
@@ -85,6 +85,14 @@ async function waitForPortable(baseUrl, name) {
   throw new Error(`Portable host did not become ready for ${name}.`);
 }
 
+async function fetchPortableToken(baseUrl) {
+  const response = await fetch(`${baseUrl}/`, { cache: "no-store" });
+  const html = await response.text();
+  const match = html.match(/window\.__CLAUDE_BUDDY_API_TOKEN__=(".*?")/);
+  assert.ok(match, "Portable index should expose an API token.");
+  return JSON.parse(match[1]);
+}
+
 async function withPortable(run, options = {}) {
   await ensurePortableBuilt();
 
@@ -96,7 +104,8 @@ async function withPortable(run, options = {}) {
     }
 
     const baseUrl = `http://127.0.0.1:${randomPort()}`;
-    const child = spawn(rootPortableExe, [], {
+    const exePath = await stat(buildPortableExe).then(() => buildPortableExe).catch(() => rootPortableExe);
+    const child = spawn(exePath, [], {
       cwd: projectRoot,
       env: {
         ...process.env,
@@ -118,7 +127,11 @@ async function withPortable(run, options = {}) {
       }
 
       const health = await waitForPortable(baseUrl, options.name ?? "portable integration");
-      await run({ baseUrl, configPath, tempRoot, health });
+      const token = await fetchPortableToken(baseUrl);
+      const apiHeaders = {
+        "X-ClaudeBuddy-Token": token,
+      };
+      await run({ baseUrl, configPath, tempRoot, health, token, apiHeaders });
     } catch (error) {
       skipOnPortableSpawnError(spawnError ?? error, options.name ?? "portable integration");
       throw error;
@@ -186,13 +199,14 @@ test("search planning keeps the attempt limit global across workers", () => {
   assert.equal(buildSequentialId("buddy-", 100, 3, 2, 4), "buddy-114");
 });
 
-test("build-portable creates a standalone exe in root", async () => {
+test("build-portable creates a standalone exe artifact", async () => {
   await ensurePortableBuilt();
 
+  const buildStat = await stat(buildPortableExe);
   const rootStat = await stat(rootPortableExe);
 
+  assert.equal(buildStat.size > 100000, true);
   assert.equal(rootStat.size > 100000, true);
-  await assert.rejects(stat(distPortableExe));
 });
 
 test("build-portable-zip creates a release zip without duplicating a dist exe", async () => {
@@ -200,7 +214,6 @@ test("build-portable-zip creates a release zip without duplicating a dist exe", 
 
   const zipStat = await stat(distPortableZip);
   assert.equal(zipStat.size > 100000, true);
-  await assert.rejects(stat(distPortableExe));
 });
 
 test("portable health endpoint reports portable mode", async () => {
@@ -211,8 +224,8 @@ test("portable health endpoint reports portable mode", async () => {
 });
 
 test("portable config status reports missing config cleanly", async () => {
-  await withPortable(async ({ baseUrl }) => {
-    const response = await fetch(`${baseUrl}/api/config/status`, { cache: "no-store" });
+  await withPortable(async ({ baseUrl, apiHeaders }) => {
+    const response = await fetch(`${baseUrl}/api/config/status`, { cache: "no-store", headers: apiHeaders });
     const status = await response.json();
 
     assert.equal(response.ok, true);
@@ -220,6 +233,17 @@ test("portable config status reports missing config cleanly", async () => {
     assert.equal(status.parseError, null);
     assert.equal(status.currentUserId, null);
   }, { name: "portable config status reports missing config cleanly" });
+});
+
+test("portable config status rejects requests without the session token", async () => {
+  await withPortable(async ({ baseUrl }) => {
+    const response = await fetch(`${baseUrl}/api/config/status`, { cache: "no-store" });
+    const payload = await response.json();
+
+    assert.equal(response.status, 403);
+    assert.equal(payload.ok, false);
+    assert.match(payload.error ?? "", /token/i);
+  }, { name: "portable config status rejects requests without the session token" });
 });
 
 test("portable apply preserves oauth access token and removes override fields", async () => {
@@ -232,10 +256,11 @@ test("portable apply preserves oauth access token and removes override fields", 
     },
   }, null, 2)}\n`;
 
-  await withPortable(async ({ baseUrl, configPath, tempRoot }) => {
+  await withPortable(async ({ baseUrl, configPath, tempRoot, apiHeaders }) => {
     const response = await fetch(`${baseUrl}/api/apply`, {
       method: "POST",
       headers: {
+        ...apiHeaders,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -264,13 +289,37 @@ test("portable apply preserves oauth access token and removes override fields", 
   });
 });
 
-test("portable apply rejects a valid non-object root without clobbering the file", async () => {
-  const original = "[]\n";
-
-  await withPortable(async ({ baseUrl, configPath }) => {
+test("portable apply rejects a non-json content type", async () => {
+  await withPortable(async ({ baseUrl, configPath, apiHeaders }) => {
     const response = await fetch(`${baseUrl}/api/apply`, {
       method: "POST",
       headers: {
+        ...apiHeaders,
+        "Content-Type": "text/plain",
+      },
+      body: JSON.stringify({
+        userId: "should-fail",
+      }),
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.ok, false);
+    assert.match(payload.error ?? "", /content-type/i);
+    assert.equal((await readFile(configPath, "utf8").catch(() => "")) === "", true);
+  }, {
+    name: "portable apply rejects a non-json content type",
+  });
+});
+
+test("portable apply rejects a valid non-object root without clobbering the file", async () => {
+  const original = "[]\n";
+
+  await withPortable(async ({ baseUrl, configPath, apiHeaders }) => {
+    const response = await fetch(`${baseUrl}/api/apply`, {
+      method: "POST",
+      headers: {
+        ...apiHeaders,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -302,10 +351,11 @@ test("portable apply handles BOM configs and can create nested config directorie
       },
     }, null, 2)}\n`;
 
-    await withPortable(async ({ baseUrl }) => {
+    await withPortable(async ({ baseUrl, apiHeaders }) => {
       const response = await fetch(`${baseUrl}/api/apply`, {
         method: "POST",
         headers: {
+          ...apiHeaders,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

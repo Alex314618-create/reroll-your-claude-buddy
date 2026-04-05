@@ -53,7 +53,7 @@ export const MESSAGES = {
       not_found_title: "No Match Found",
       not_found_copy: "The roll finished with no hit.",
       doubled_limit: "Attempt limit raised to {limit}. Auto-retrying.",
-      back_with_more: "Back With 2x Attempts",
+      back_with_more: "Back To Setup",
     },
     results: {
       kicker: "Matches",
@@ -81,6 +81,7 @@ export const MESSAGES = {
       note: "Apply directly inside the portable app.",
       button: "Apply Selected Buddy",
       apply_selected: "Apply Selected Buddy",
+      applying: "Applying...",
       copy_user_id: "Copy Selected userID",
       advanced_summary: "Advanced Apply Options",
       backup: "Create a backup before writing",
@@ -263,7 +264,7 @@ export const MESSAGES = {
       not_found_title: "没有找到结果",
       not_found_copy: "这次搜索没有命中。",
       doubled_limit: "尝试上限已提升到 {limit}，正在自动重试。",
-      back_with_more: "返回并用 2 倍次数重试",
+      back_with_more: "返回设定页",
     },
     results: {
       kicker: "命中结果",
@@ -291,6 +292,7 @@ export const MESSAGES = {
       note: "直接在 Portable 程序里应用。",
       button: "一键应用当前 Buddy",
       apply_selected: "一键应用当前 Buddy",
+      applying: "正在应用...",
       copy_user_id: "复制当前 userID",
       advanced_summary: "高级写入选项",
       backup: "写入前创建备份",

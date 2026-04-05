@@ -10,9 +10,6 @@ const cargoTargetDir = path.join(projectRoot, "build", "cargo-target");
 const distDir = path.join(projectRoot, "dist");
 const rootPortableExe = path.join(projectRoot, "ClaudeBuddyLocalPortable.exe");
 const buildExe = path.join(cargoTargetDir, "release", "claude_buddy_portable.exe");
-const staleDistFiles = [
-  path.join(distDir, "ClaudeBuddyLocalPortable.exe"),
-];
 
 function cleanDir(target) {
   if (!existsSync(target)) {
@@ -31,9 +28,6 @@ function cleanDir(target) {
 }
 
 function main() {
-  for (const target of staleDistFiles) {
-    cleanDir(target);
-  }
   mkdirSync(cargoTargetDir, { recursive: true });
   mkdirSync(distDir, { recursive: true });
 
@@ -55,9 +49,19 @@ function main() {
     },
   );
 
-  cpSync(buildExe, rootPortableExe);
+  try {
+    cpSync(buildExe, rootPortableExe);
+    console.log(`Updated ${rootPortableExe}`);
+  } catch (error) {
+    if (["EPERM", "EACCES", "EBUSY", "EIO"].includes(error?.code)) {
+      console.warn(`Portable build succeeded, but the root exe is in use: ${rootPortableExe}`);
+      console.warn("Close the running Portable app and rebuild if you want to refresh the visible root exe.");
+      return;
+    }
 
-  console.log(`Updated ${rootPortableExe}`);
+    throw error;
+  }
+
 }
 
 main();

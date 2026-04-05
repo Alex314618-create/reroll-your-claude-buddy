@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
@@ -8,13 +9,17 @@ use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const IDLE_TIMEOUT_SECS: u64 = 120;
 const POLL_INTERVAL_MS: u64 = 100;
+const MAX_HEADER_BYTES: usize = 1024 * 1024;
+const MAX_BODY_BYTES: usize = 16 * 1024;
+const API_TOKEN_HEADER: &str = "x-claudebuddy-token";
+static NEXT_UNIQUE_ID: AtomicU64 = AtomicU64::new(1);
 
 const INDEX_HTML: &[u8] = include_bytes!("../../../app/index.html");
 const APP_JS: &[u8] = include_bytes!("../../../app/app.js");
@@ -49,6 +54,7 @@ fn run() -> Result<(), String> {
         .map_err(|error| error.to_string())?;
 
     let config_store = Arc::new(ConfigStore::new());
+    let session = Arc::new(SessionState::new(&base_url));
     let last_activity = Arc::new(AtomicU64::new(now_unix_secs()));
 
     if !should_skip_browser() {
@@ -65,9 +71,10 @@ fn run() -> Result<(), String> {
                 last_activity.store(now_unix_secs(), Ordering::Relaxed);
                 let assets = Arc::clone(&assets);
                 let config_store = Arc::clone(&config_store);
+                let session = Arc::clone(&session);
                 let last_activity = Arc::clone(&last_activity);
                 thread::spawn(move || {
-                    if let Err(error) = handle_connection(stream, assets, config_store, last_activity) {
+                    if let Err(error) = handle_connection(stream, assets, config_store, session, last_activity) {
                         let _ = error;
                     }
                 });
@@ -89,6 +96,7 @@ fn handle_connection(
     mut stream: TcpStream,
     assets: Arc<EmbeddedAssets>,
     config_store: Arc<ConfigStore>,
+    session: Arc<SessionState>,
     last_activity: Arc<AtomicU64>,
 ) -> Result<(), String> {
     stream
@@ -110,12 +118,25 @@ fn handle_connection(
                 "portable": true
             }),
         ),
-        ("GET", "/api/ping") => Response::empty(204),
-        ("GET", "/api/config/status") => json_response(200, &config_store.get_status()),
-        ("POST", "/api/apply") => match config_store.apply_user_id(&request.body) {
-            Ok(result) => json_response(200, &json!({ "ok": true, "result": result })),
-            Err(error) => json_response(400, &json!({ "ok": false, "error": error })),
+        ("GET", "/api/ping") => match validate_api_request(&request, &session, false) {
+            Ok(()) => Response::empty(204),
+            Err(response) => response,
         },
+        ("GET", "/api/config/status") => match validate_api_request(&request, &session, false) {
+            Ok(()) => json_response(200, &config_store.get_status()),
+            Err(response) => response,
+        },
+        ("POST", "/api/apply") => match validate_api_request(&request, &session, true) {
+            Ok(()) => match config_store.apply_user_id(&request.body) {
+                Ok(result) => json_response(200, &json!({ "ok": true, "result": result })),
+                Err(error) => json_response(400, &json!({ "ok": false, "error": error })),
+            },
+            Err(response) => response,
+        },
+        ("GET", "/") | ("GET", "/index.html") => Response::ok(
+            "text/html; charset=utf-8",
+            assets.render_index_html(&session),
+        ),
         _ => match assets.get(path) {
             Some((content_type, body)) => Response::ok(content_type, body.to_vec()),
             None => Response::text(404, "Not Found"),
@@ -142,7 +163,7 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
             header_end = index;
             break;
         }
-        if buffer.len() > 1024 * 1024 {
+        if buffer.len() > MAX_HEADER_BYTES {
             return Err("Request headers too large.".to_string());
         }
     }
@@ -161,13 +182,23 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
         .ok_or_else(|| "Missing request path.".to_string())?
         .to_string();
 
+    let mut headers = HashMap::new();
     let mut content_length = 0_usize;
     for line in lines {
-        if let Some((name, value)) = line.split_once(':')
-            && name.trim().eq_ignore_ascii_case("content-length")
-        {
-            content_length = value.trim().parse::<usize>().map_err(|_| "Invalid Content-Length.".to_string())?;
+        if let Some((name, value)) = line.split_once(':') {
+            let normalized_name = name.trim().to_ascii_lowercase();
+            let normalized_value = value.trim().to_string();
+            if normalized_name == "content-length" {
+                content_length = normalized_value
+                    .parse::<usize>()
+                    .map_err(|_| "Invalid Content-Length.".to_string())?;
+            }
+            headers.insert(normalized_name, normalized_value);
         }
+    }
+
+    if content_length > MAX_BODY_BYTES {
+        return Err("Request body too large.".to_string());
     }
 
     let body_start = header_end + 4;
@@ -178,14 +209,53 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
             return Err("Unexpected end of request body.".to_string());
         }
         body.extend_from_slice(&chunk[..read]);
+        if body.len() > MAX_BODY_BYTES {
+            return Err("Request body too large.".to_string());
+        }
     }
     body.truncate(content_length);
 
-    Ok(Request { method, path, body })
+    Ok(Request {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
     buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn validate_api_request(
+    request: &Request,
+    session: &SessionState,
+    require_json: bool,
+) -> Result<(), Response> {
+    let token = request.header(API_TOKEN_HEADER);
+    if token != Some(session.api_token.as_str()) {
+        return Err(json_response(403, &json!({ "ok": false, "error": "Invalid session token." })));
+    }
+
+    if let Some(origin) = request.header("origin")
+        && origin != session.origin
+    {
+        return Err(json_response(403, &json!({ "ok": false, "error": "Invalid request origin." })));
+    }
+
+    if require_json {
+        let content_type = request
+            .header("content-type")
+            .map(|value| value.split(';').next().unwrap_or("").trim().to_ascii_lowercase());
+        if content_type.as_deref() != Some("application/json") {
+            return Err(json_response(
+                400,
+                &json!({ "ok": false, "error": "Content-Type must be application/json." }),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn write_response(stream: &mut TcpStream, response: Response) -> Result<(), String> {
@@ -193,7 +263,9 @@ fn write_response(stream: &mut TcpStream, response: Response) -> Result<(), Stri
         200 => "OK",
         204 => "No Content",
         400 => "Bad Request",
+        403 => "Forbidden",
         404 => "Not Found",
+        413 => "Payload Too Large",
         _ => "OK",
     };
 
@@ -312,7 +384,16 @@ unsafe extern "system" {
 struct Request {
     method: String,
     path: String,
+    headers: HashMap<String, String>,
     body: Vec<u8>,
+}
+
+impl Request {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .get(&name.to_ascii_lowercase())
+            .map(String::as_str)
+    }
 }
 
 struct Response {
@@ -368,6 +449,22 @@ impl EmbeddedAssets {
             _ => None,
         }
     }
+
+    fn render_index_html(&self, session: &SessionState) -> Vec<u8> {
+        let html = String::from_utf8_lossy(INDEX_HTML);
+        let token = serde_json::to_string(&session.api_token).unwrap_or_else(|_| "\"\"".to_string());
+        let bootstrap = format!("<script>window.__CLAUDE_BUDDY_API_TOKEN__={token};</script>");
+
+        if let Some(index) = html.find("</head>") {
+            let mut rendered = String::with_capacity(html.len() + bootstrap.len());
+            rendered.push_str(&html[..index]);
+            rendered.push_str(&bootstrap);
+            rendered.push_str(&html[index..]);
+            return rendered.into_bytes();
+        }
+
+        format!("{bootstrap}{html}").into_bytes()
+    }
 }
 
 fn normalize_asset_path(raw_path: &str) -> Option<String> {
@@ -389,11 +486,29 @@ fn normalize_asset_path(raw_path: &str) -> Option<String> {
     Some(path)
 }
 
-struct ConfigStore;
+struct SessionState {
+    api_token: String,
+    origin: String,
+}
+
+impl SessionState {
+    fn new(base_url: &str) -> Self {
+        Self {
+            api_token: format!("buddy-token-{}", unique_suffix()),
+            origin: base_url.to_string(),
+        }
+    }
+}
+
+struct ConfigStore {
+    apply_lock: Mutex<()>,
+}
 
 impl ConfigStore {
     fn new() -> Self {
-        Self
+        Self {
+            apply_lock: Mutex::new(()),
+        }
     }
 
     fn get_status(&self) -> Value {
@@ -438,6 +553,7 @@ impl ConfigStore {
     }
 
     fn apply_user_id(&self, body: &[u8]) -> Result<Value, String> {
+        let _guard = self.apply_lock.lock().map_err(|_| "Apply lock poisoned.".to_string())?;
         let request: Value = serde_json::from_slice(body).map_err(|error| error.to_string())?;
         let user_id = request
             .get("userId")
@@ -464,11 +580,7 @@ impl ConfigStore {
 
         let mut backup_path = None;
         if backup && config_path.exists() {
-            let backup_name = format!(
-                "{}.buddy-backup-{}",
-                config_path.display(),
-                backup_timestamp()
-            );
+            let backup_name = format!("{}.buddy-backup-{}", config_path.display(), unique_suffix());
             fs::copy(&config_path, &backup_name).map_err(|error| error.to_string())?;
             backup_path = Some(backup_name);
         }
@@ -494,16 +606,8 @@ impl ConfigStore {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
 
-        let temp_path = config_path.with_extension(format!(
-            "json.tmp-{}-{}",
-            std::process::id(),
-            now_unix_secs()
-        ));
-        let replacement_path = config_path.with_extension(format!(
-            "json.replace-{}-{}",
-            std::process::id(),
-            now_unix_secs()
-        ));
+        let temp_path = config_path.with_extension(format!("json.tmp-{}", unique_suffix()));
+        let replacement_path = config_path.with_extension(format!("json.replace-{}", unique_suffix()));
 
         let payload = format!(
             "{}\n",
@@ -597,6 +701,14 @@ fn replace_existing_file(config_path: &Path, temp_path: &Path, replacement_path:
     Ok(())
 }
 
-fn backup_timestamp() -> String {
-    format!("{}", now_unix_secs())
+fn unique_suffix() -> String {
+    let counter = NEXT_UNIQUE_ID.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{}-{}", std::process::id(), now_unix_millis(), counter)
+}
+
+fn now_unix_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
