@@ -1,220 +1,266 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Claude Buddy Local</title>
+    <title>Reroll Your Claude Buddy</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="page">
-      <header class="masthead">
-        <div class="masthead-copy">
-          <div class="masthead-topline">
-            <p class="kicker" data-i18n="header.kicker"></p>
-            <div class="lang-switch" role="group" aria-label="Language">
-              <button class="lang-button" data-locale="zh-CN" type="button">中文</button>
-              <button class="lang-button" data-locale="en" type="button">EN</button>
-            </div>
-          </div>
-
-          <h1>Claude Buddy Local</h1>
-          <p class="lede" data-i18n="header.lede"></p>
-
-          <div class="hero-pills">
-            <span class="hero-pill" data-i18n="header.pill_local"></span>
-            <span class="hero-pill" data-i18n="header.pill_fast"></span>
-            <span class="hero-pill" data-i18n="header.pill_beginner"></span>
-          </div>
+    <div class="page-shell">
+      <header class="site-header">
+        <div class="brand-block">
+          <p class="section-kicker" data-i18n="header.kicker"></p>
+          <h1 data-i18n="header.title"></h1>
+          <p class="hero-copy" data-i18n="header.subtitle"></p>
         </div>
 
-        <div class="masthead-cards">
-          <section class="mini-panel">
-            <p class="mini-label" data-i18n="header.card_roll_label"></p>
-            <strong data-i18n="header.card_roll_title"></strong>
-            <p class="mini-copy" data-i18n="header.card_roll_copy"></p>
-          </section>
+        <div class="header-side">
+          <nav class="stepper" aria-label="Flow">
+            <span class="step-pill is-active" data-step="setup" data-i18n="steps.setup"></span>
+            <span class="step-pill" data-step="rolling" data-i18n="steps.rolling"></span>
+            <span class="step-pill" data-step="result" data-i18n="steps.result"></span>
+          </nav>
 
-          <section class="mini-panel">
-            <p class="mini-label" data-i18n="header.card_apply_label"></p>
-            <strong data-i18n="header.card_apply_title"></strong>
-            <p class="mini-copy" data-i18n="header.card_apply_copy"></p>
-          </section>
+          <div class="lang-switch" role="group" aria-label="Language">
+            <button class="lang-button" data-locale="en" type="button">EN</button>
+            <button class="lang-button" data-locale="zh-CN" type="button">中文</button>
+          </div>
         </div>
       </header>
 
-      <main class="workspace">
-        <aside class="panel controls-panel">
-          <div class="section-head">
-            <p class="section-kicker" data-i18n="controls.kicker"></p>
-            <h2 data-i18n="controls.title"></h2>
-            <p class="section-note" data-i18n="controls.note"></p>
-          </div>
+      <div class="status-banner" id="statusBanner"></div>
 
-          <div class="control-group">
-            <label data-i18n="controls.species"></label>
-            <div class="chip-grid" id="speciesGrid"></div>
-          </div>
-
-          <div class="control-group">
-            <label data-i18n="controls.rarity"></label>
-            <div class="chip-row" id="rarityRow"></div>
-          </div>
-
-          <div class="control-group">
-            <label data-i18n="controls.eyes"></label>
-            <div class="chip-row" id="eyeRow"></div>
-          </div>
-
-          <div class="control-group">
-            <label data-i18n="controls.hat"></label>
-            <div class="chip-row" id="hatRow"></div>
-          </div>
-
-          <div class="control-group">
-            <label data-i18n="controls.shiny"></label>
-            <div class="chip-row" id="shinyRow"></div>
-          </div>
-
-          <div class="actions">
-            <button class="primary" id="runButton" type="button" data-i18n="controls.start"></button>
-            <button class="secondary" id="stopButton" type="button" disabled data-i18n="controls.stop"></button>
-          </div>
-
-          <div class="stack">
-            <div class="info-card info-card-accent" id="searchEstimate"></div>
-            <div class="info-card" id="hashStatus"></div>
-          </div>
-
-          <details class="advanced-panel" id="advancedPanel">
-            <summary data-i18n="advanced.summary"></summary>
-
-            <div class="advanced-body">
-              <div class="section-head section-head-tight">
-                <p class="section-kicker" data-i18n="advanced.search_method"></p>
+      <main>
+        <section class="view is-active" id="setupView" aria-labelledby="setupTitle">
+          <div class="setup-layout">
+            <article class="scene-card filter-card">
+              <div class="panel-header">
+                <p class="section-kicker" data-i18n="controls.kicker"></p>
+                <h2 id="setupTitle" data-i18n="controls.title"></h2>
+                <p class="panel-copy" data-i18n="controls.note"></p>
               </div>
 
-              <div class="mode-row" id="modeRow">
-                <button class="mode-card selected" data-mode="random" type="button">
-                  <span class="mode-title" data-i18n="advanced.random_title"></span>
-                  <span class="mode-copy" data-i18n="advanced.random_copy"></span>
-                </button>
-                <button class="mode-card" data-mode="sequential" type="button">
-                  <span class="mode-title" data-i18n="advanced.sequential_title"></span>
-                  <span class="mode-copy" data-i18n="advanced.sequential_copy"></span>
-                </button>
+              <div class="control-group">
+                <label data-i18n="controls.species"></label>
+                <div class="chip-grid chip-grid-species" id="speciesGrid"></div>
               </div>
 
-              <div class="form-grid">
-                <label class="field">
-                  <span data-i18n="advanced.hash"></span>
-                  <select id="algorithmInput">
-                    <option value="bun">Bun / Wyhash</option>
-                    <option value="fnv">Legacy / FNV-1a</option>
-                  </select>
-                </label>
-
-                <label class="field">
-                  <span data-i18n="advanced.count"></span>
-                  <input id="countInput" type="number" value="1" min="1" max="25" />
-                </label>
-
-                <label class="field">
-                  <span data-i18n="advanced.limit"></span>
-                  <input id="limitInput" type="number" value="500000" min="1" />
-                </label>
-
-                <label class="field">
-                  <span data-i18n="advanced.workers"></span>
-                  <input id="workersInput" type="number" value="4" min="1" max="16" />
-                </label>
-
-                <label class="field" id="bytesField">
-                  <span data-i18n="advanced.bytes"></span>
-                  <input id="bytesInput" type="number" value="32" min="4" max="64" />
-                </label>
-
-                <label class="field hidden" id="prefixField">
-                  <span data-i18n="advanced.prefix"></span>
-                  <input id="prefixInput" type="text" value="buddy-" />
-                </label>
-
-                <label class="field hidden" id="startField">
-                  <span data-i18n="advanced.start"></span>
-                  <input id="startInput" type="number" value="0" min="0" />
-                </label>
+              <div class="control-group">
+                <label data-i18n="controls.rarity"></label>
+                <div class="chip-row" id="rarityRow"></div>
               </div>
-            </div>
-          </details>
-        </aside>
 
-        <section class="panel results-panel">
-          <div class="section-head section-head-row">
-            <div>
-              <p class="section-kicker" data-i18n="results.kicker"></p>
-              <h2 data-i18n="results.title"></h2>
-            </div>
-            <p class="section-note" data-i18n="results.note"></p>
+              <div class="control-group">
+                <label data-i18n="controls.eyes"></label>
+                <div class="chip-row" id="eyeRow"></div>
+              </div>
+
+              <div class="control-group">
+                <label data-i18n="controls.hat"></label>
+                <div class="chip-row" id="hatRow"></div>
+              </div>
+
+              <div class="control-group">
+                <label data-i18n="controls.shiny"></label>
+                <div class="chip-row" id="shinyRow"></div>
+              </div>
+
+              <details class="advanced-panel">
+                <summary data-i18n="advanced.summary"></summary>
+
+                <div class="advanced-body">
+                  <div class="mode-row" id="modeRow">
+                    <button class="mode-card selected" data-mode="random" type="button">
+                      <span class="mode-title" data-i18n="advanced.random_title"></span>
+                      <span class="mode-copy" data-i18n="advanced.random_copy"></span>
+                    </button>
+                    <button class="mode-card" data-mode="sequential" type="button">
+                      <span class="mode-title" data-i18n="advanced.sequential_title"></span>
+                      <span class="mode-copy" data-i18n="advanced.sequential_copy"></span>
+                    </button>
+                  </div>
+
+                  <div class="form-grid">
+                    <label class="field">
+                      <span data-i18n="advanced.hash"></span>
+                      <select id="algorithmInput">
+                        <option value="bun">Bun / Wyhash</option>
+                        <option value="fnv">Legacy / FNV-1a</option>
+                      </select>
+                    </label>
+
+                    <label class="field">
+                      <span data-i18n="advanced.count"></span>
+                      <input id="countInput" type="number" value="1" min="1" max="25" />
+                    </label>
+
+                    <label class="field">
+                      <span data-i18n="advanced.limit"></span>
+                      <input id="limitInput" type="number" value="500000" min="1" />
+                    </label>
+
+                    <label class="field">
+                      <span data-i18n="advanced.workers"></span>
+                      <input id="workersInput" type="number" value="4" min="1" max="16" />
+                    </label>
+
+                    <label class="field" id="bytesField">
+                      <span data-i18n="advanced.bytes"></span>
+                      <input id="bytesInput" type="number" value="32" min="4" max="64" />
+                    </label>
+
+                    <label class="field hidden" id="prefixField">
+                      <span data-i18n="advanced.prefix"></span>
+                      <input id="prefixInput" type="text" value="buddy-" />
+                    </label>
+
+                    <label class="field hidden" id="startField">
+                      <span data-i18n="advanced.start"></span>
+                      <input id="startInput" type="number" value="0" min="0" />
+                    </label>
+                  </div>
+                </div>
+              </details>
+            </article>
+
+            <aside class="scene-card setup-card">
+              <div class="panel-header">
+                <p class="section-kicker" data-i18n="setup.kicker"></p>
+                <h2 data-i18n="setup.title"></h2>
+                <p class="panel-copy" data-i18n="setup.note"></p>
+              </div>
+
+              <div class="signal-grid signal-grid-two">
+                <article class="signal-card" data-slot="estimate"></article>
+                <article class="signal-card" data-slot="hash"></article>
+              </div>
+
+              <article class="summary-card" id="setupFilterSummary"></article>
+
+              <button class="launch-button" id="runButton" type="button" data-i18n="controls.start"></button>
+            </aside>
           </div>
-
-          <div class="progress-card" id="progressCard"></div>
-          <div class="results-list" id="resultsList"></div>
         </section>
 
-        <aside class="panel apply-panel">
-          <div class="section-head">
-            <p class="section-kicker" data-i18n="apply.kicker"></p>
-            <h2 data-i18n="apply.title"></h2>
-            <p class="section-note" data-i18n="apply.note"></p>
-          </div>
-
-          <div class="info-card selected-summary" id="selectedSummary"></div>
-
-          <div class="actions actions-vertical">
-            <button class="primary" id="copyPowerShellButton" type="button" disabled data-i18n="apply.button"></button>
-            <button class="secondary" id="copyNodeButton" type="button" disabled data-i18n="apply.copy_node"></button>
-          </div>
-
-          <div class="info-card" id="configSummary"></div>
-          <div class="info-card config-log" id="configLog"></div>
-
-          <details class="advanced-panel advanced-panel-compact">
-            <summary data-i18n="apply.advanced_summary"></summary>
-
-            <div class="advanced-body advanced-body-compact">
-              <label class="checkbox">
-                <input id="backupInput" type="checkbox" checked />
-                <span data-i18n="apply.backup"></span>
-              </label>
-
-              <label class="checkbox">
-                <input id="removeCompanionInput" type="checkbox" checked />
-                <span data-i18n="apply.remove_companion"></span>
-              </label>
-
-              <label class="checkbox">
-                <input id="removeAccountUuidInput" type="checkbox" checked />
-                <span data-i18n="apply.remove_account_uuid"></span>
-              </label>
+        <section class="view" id="rollingView" aria-labelledby="rollingTitle">
+          <article class="scene-card rolling-card">
+            <div class="panel-header center">
+              <p class="section-kicker" data-i18n="rolling.kicker"></p>
+              <h2 id="rollingTitle" data-i18n="rolling.title"></h2>
+              <p class="panel-copy" data-i18n="rolling.note"></p>
             </div>
-          </details>
-        </aside>
+
+            <div class="scanner-stage" aria-hidden="true">
+              <div class="scanner-ring ring-a"></div>
+              <div class="scanner-ring ring-b"></div>
+              <div class="scanner-ring ring-c"></div>
+              <div class="scanner-core" data-i18n="rolling.core"></div>
+            </div>
+
+            <div class="rolling-feedback hidden" id="rollingFeedback"></div>
+
+            <div class="signal-grid rolling-grid">
+              <article class="signal-card wide" id="progressCard"></article>
+              <article class="signal-card" data-slot="estimate"></article>
+              <article class="signal-card" data-slot="hash"></article>
+              <article class="signal-card" id="rollingFilterSummary"></article>
+            </div>
+
+            <div class="rolling-actions">
+              <button class="ghost-button" id="stopButton" type="button" disabled data-i18n="controls.stop"></button>
+              <button class="primary-button hidden" id="returnAfterFailureButton" type="button" data-i18n="rolling.back_with_more"></button>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="resultView" aria-labelledby="resultTitle">
+          <div class="result-layout">
+            <article class="scene-card result-stage">
+              <div class="panel-header">
+                <p class="section-kicker" data-i18n="result_stage.kicker"></p>
+                <h2 id="resultTitle" data-i18n="result_stage.title"></h2>
+                <p class="panel-copy" data-i18n="result_stage.note"></p>
+              </div>
+
+              <div id="selectedSummary"></div>
+            </article>
+
+            <aside class="result-sidebar">
+              <article class="scene-card result-list-card">
+                <div class="panel-header panel-header-row">
+                  <div>
+                    <p class="section-kicker" data-i18n="results.kicker"></p>
+                    <h2 data-i18n="results.title"></h2>
+                  </div>
+                  <button class="ghost-button compact-button" id="backToSetupButton" type="button" data-i18n="result_stage.back"></button>
+                </div>
+
+                <div class="results-list" id="resultsList"></div>
+              </article>
+
+              <article class="scene-card apply-card">
+                <div class="panel-header">
+                  <p class="section-kicker" data-i18n="apply.kicker"></p>
+                  <h2 data-i18n="apply.title"></h2>
+                  <p class="panel-copy" data-i18n="apply.note"></p>
+                </div>
+
+                <div class="action-stack">
+                  <button class="primary-button" id="copyPowerShellButton" type="button" disabled data-i18n="apply.button"></button>
+                  <button class="ghost-button" id="copyNodeButton" type="button" disabled data-i18n="apply.copy_node"></button>
+                </div>
+
+                <div class="info-card" id="configSummary"></div>
+                <div class="info-card config-log" id="configLog"></div>
+
+                <details class="advanced-panel compact">
+                  <summary data-i18n="apply.advanced_summary"></summary>
+
+                  <div class="advanced-body compact-grid">
+                    <label class="checkbox-row">
+                      <input id="backupInput" type="checkbox" checked />
+                      <span data-i18n="apply.backup"></span>
+                    </label>
+
+                    <label class="checkbox-row">
+                      <input id="removeCompanionInput" type="checkbox" checked />
+                      <span data-i18n="apply.remove_companion"></span>
+                    </label>
+
+                    <label class="checkbox-row">
+                      <input id="removeAccountUuidInput" type="checkbox" checked />
+                      <span data-i18n="apply.remove_account_uuid"></span>
+                    </label>
+                  </div>
+                </details>
+              </article>
+            </aside>
+          </div>
+        </section>
       </main>
     </div>
 
     <template id="resultTemplate">
-      <article class="result-card">
-        <div class="result-topline">
-          <span class="species-badge"></span>
-          <span class="rarity-badge"></span>
-          <span class="shiny-badge"></span>
+      <article class="result-item">
+        <div class="result-item-top">
+          <div>
+            <p class="result-species"></p>
+            <h3 class="result-id"></h3>
+          </div>
+          <span class="badge selection-badge"></span>
         </div>
-        <h3 class="result-id"></h3>
+
+        <div class="result-flags">
+          <span class="badge rarity-badge"></span>
+          <span class="badge shiny-badge"></span>
+        </div>
+
         <p class="result-traits"></p>
-        <div class="stats-grid"></div>
-        <div class="card-actions">
-          <button class="secondary copy-button" type="button"></button>
-          <button class="primary select-button" type="button"></button>
+
+        <div class="result-item-actions">
+          <button class="ghost-button compact-button copy-button" type="button"></button>
+          <button class="primary-button compact-button select-button" type="button"></button>
         </div>
       </article>
     </template>

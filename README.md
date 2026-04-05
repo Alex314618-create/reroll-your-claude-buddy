@@ -1,56 +1,45 @@
 # Claude Buddy Local
 
-面向小白的最快速 Claude Buddy 本地工具。
+面向小白的 Claude Buddy Portable 一键版。
 
-这版只保留最轻的交付形态：
+现在的主发布形态是 Windows Portable：
 
-- `ClaudeBuddyLocal.html`
-- `apply-userid.ps1`
-- `apply-userid.mjs`
-
-没有桌面壳，没有安装器，没有本地 HTTP 服务。
+- 双击 `ClaudeBuddyLocalPortable.exe`
+- 自动打开本地页面
+- 直接筛选、搜索、选中、应用
+- 不需要再复制命令或手动打开 PowerShell
 
 ## 这是什么
 
-这是一个本地优先的 Claude Buddy 筛选和 roll 工具。你可以：
+这是一个本地优先的 Claude Buddy 筛选和 reroll 工具。
+
+你可以：
 
 1. 按物种、稀有度、眼睛、帽子、闪光来筛选 buddy
 2. 从结果列表里选中自己想要的 buddy
-3. 复制一条命令，把对应 `userID` 写入本机 `~/.claude.json`
+3. 在页面内直接把对应 `userID` 写入本机 `~/.claude.json`
 
-默认界面只保留最常用的操作。线程数、前缀、随机字节数、顺序搜索这些技术参数都收进了“高级设置”。
+## 当前推荐版本
 
-## 为什么这版更轻
+推荐直接使用 Portable 版。
 
-现在发布物只有：
+Portable 压缩包解压后会包含：
 
-- 一个单文件网页
-- 一个 PowerShell 应用脚本
-- 一个 Node 应用脚本
+- `ClaudeBuddyLocalPortable.exe`
+- `app/` 目录
 
-已经移除：
+注意：
 
-- `.NET` 桌面壳
-- 安装器链路
-- 本地 HTTP 服务
-- `SEA exe` 发布路线
-
-## 最适合谁
-
-- 想快速 roll 到自己喜欢的 buddy
-- 不想折腾复杂环境
-- 更希望看到清楚直观的界面
-- 希望工具本身尽可能轻、容易发布到 GitHub
+- `exe` 和 `app/` 目录必须放在一起
+- 用户应解压整个 zip，再双击 `ClaudeBuddyLocalPortable.exe`
 
 ## 小白使用方式
 
-1. 直接打开 `ClaudeBuddyLocal.html`
-2. 在页面里筛选并搜索 buddy
-3. 在结果列表里选中一个
-4. 点击“复制 PowerShell 命令”
-5. 在同目录打开 Windows PowerShell，粘贴执行
-
-如果你更习惯 Node，也可以复制 Node 命令。
+1. 解压 Portable 压缩包
+2. 双击 `ClaudeBuddyLocalPortable.exe`
+3. 等它自动打开页面
+4. 搜索并选中一个 buddy
+5. 点击“一键应用当前 Buddy”
 
 ## 前置条件
 
@@ -60,14 +49,25 @@
 2. 运行 `claude setup-token`
 3. 确认系统已经生成 `~/.claude.json`
 
-## 发布物
+## 构建 Portable
 
-构建 release 不需要先 `npm install`。
-
-直接运行：
+主构建命令：
 
 ```powershell
-node scripts/build-release.mjs
+npm.cmd run build:portable
+```
+
+会输出：
+
+```text
+dist\portable\ClaudeBuddyLocalPortable.exe
+dist\portable\app\...
+```
+
+打包 Portable zip：
+
+```powershell
+npm.cmd run build:portable:zip
 ```
 
 或者：
@@ -76,54 +76,28 @@ node scripts/build-release.mjs
 npm.cmd run build:release
 ```
 
-输出：
+会输出：
 
 ```text
-dist\ClaudeBuddyLocal.html
-dist\apply-userid.ps1
-dist\apply-userid.mjs
+dist\ClaudeBuddyLocalPortable.zip
 ```
 
-打包 zip：
+## 平台说明
+
+- 当前 Portable 主线是 Windows-only
+- `build:portable:zip` 目前依赖 `powershell.exe`
+- 如果以后要接跨平台 CI，再把 zip 打包改成纯 Node 即可
+
+## 旧的 Lite 构建
+
+仓库里仍然保留了旧的轻量 HTML 方案，主要用于开发和回退，不再是主发布方式。
+
+可选命令：
 
 ```powershell
-node scripts/build-zip.mjs
+npm.cmd run build:lite
+npm.cmd run build:lite:zip
 ```
-
-或者：
-
-```powershell
-npm.cmd run build:zip
-```
-
-输出：
-
-```text
-dist\ClaudeBuddyLocal-release.zip
-```
-
-## 应用脚本
-
-PowerShell 版本：
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File .\apply-userid.ps1 -UserId "YOUR_USER_ID"
-```
-
-Node 版本：
-
-```powershell
-node .\apply-userid.mjs "YOUR_USER_ID"
-```
-
-可选参数：
-
-- `-NoBackup` / `--no-backup`
-- `-KeepCompanion` / `--keep-companion`
-- `-KeepAccountUuid` / `--keep-account-uuid`
-
-也支持用环境变量 `CLAUDE_CONFIG_PATH` 覆盖默认配置路径。
-如果这个路径的父目录不存在，Node 和 PowerShell helper 都会自动创建。
 
 ## 测试
 
@@ -136,6 +110,7 @@ npm.cmd test
 - hash 自检
 - roll 的 deterministic 行为
 - filters 逻辑
+- 全局 attempt limit 分配逻辑
 - 配置缺失
 - 配置损坏 JSON
 - 合法但非对象根节点的 JSON 配置
@@ -149,4 +124,4 @@ npm.cmd test
 
 说明：
 
-- 如果当前环境禁止测试进程拉起 `powershell.exe`，PowerShell 集成项会显示为 `SKIP`，不会再伪装成 `PASS`。
+- 如果当前环境禁止测试进程拉起 `powershell.exe`，PowerShell 集成项会显示为 `SKIP`

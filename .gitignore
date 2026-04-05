@@ -1,6 +1,7 @@
 .npm-cache/
 build/
 dist/
+ClaudeBuddyLocalPortable.exe
 desktop/**/bin/
 desktop/**/obj/
 node_modules/

@@ -241,11 +241,13 @@ test("applyUserId rejects a valid non-object root without overwriting the file",
   });
 });
 
-test("build-release creates only the lightweight release files", async () => {
+test("build-release creates the lightweight release files", async () => {
   await ensureReleaseBuilt();
   const names = (await readdir(distDir)).sort();
 
-  assert.deepEqual(names, ["ClaudeBuddyLocal.html", "apply-userid.mjs", "apply-userid.ps1"]);
+  for (const name of ["ClaudeBuddyLocal.html", "apply-userid.mjs", "apply-userid.ps1"]) {
+    assert.equal(names.includes(name), true);
+  }
 });
 
 test("dist/apply-userid.mjs runs standalone in an isolated directory and handles BOM configs", async () => {
