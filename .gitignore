@@ -2,7 +2,6 @@
 build/
 dist/
 ClaudeBuddyLocalPortable.exe
-desktop/**/bin/
-desktop/**/obj/
+audits/
 node_modules/
 temp_release_check*/

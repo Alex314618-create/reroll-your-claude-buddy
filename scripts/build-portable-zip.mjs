@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const distDir = path.join(projectRoot, "dist");
-const portableDir = path.join(distDir, "portable");
+const portableExe = path.join(projectRoot, "ClaudeBuddyLocalPortable.exe");
 const zipPath = path.join(distDir, "ClaudeBuddyLocalPortable.zip");
 
 execFileSync(process.execPath, [path.join(projectRoot, "scripts", "build-portable.mjs")], {
@@ -23,7 +23,7 @@ execFileSync(
   [
     "-NoProfile",
     "-Command",
-    `Compress-Archive -Path '${path.join(portableDir, "*")}' -DestinationPath '${zipPath}' -Force`,
+    `Compress-Archive -Path '${portableExe}' -DestinationPath '${zipPath}' -Force`,
   ],
   {
     cwd: projectRoot,

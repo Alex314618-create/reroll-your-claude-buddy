@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { copyFile, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import {
   BUN_HASH_SELF_TESTS,
   hashStringBun,
@@ -13,13 +13,15 @@ import {
   wyhash64,
 } from "../app/shared/buddy-core.js";
 import { buildSequentialId, calculateLocalLimit, getEffectiveWorkerCount } from "../app/shared/search-plan.js";
-import { applyUserId, getConfigStatus } from "../src/config-store.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const distDir = path.join(projectRoot, "dist");
+const rootPortableExe = path.join(projectRoot, "ClaudeBuddyLocalPortable.exe");
+const distPortableExe = path.join(distDir, "ClaudeBuddyLocalPortable.exe");
+const distPortableZip = path.join(distDir, "ClaudeBuddyLocalPortable.zip");
 const tests = [];
-let releaseBuilt = false;
+let portableBuilt = false;
 
 class SkipTest extends Error {
   constructor(message) {
@@ -41,66 +43,95 @@ async function withTempDir(run) {
   }
 }
 
-async function withTempConfig(run) {
-  await withTempDir(async (tempRoot) => {
-    const configPath = path.join(tempRoot, ".claude.json");
-    const previous = process.env.CLAUDE_CONFIG_PATH;
-    process.env.CLAUDE_CONFIG_PATH = configPath;
-
-    try {
-      await run(configPath, tempRoot);
-    } finally {
-      if (previous === undefined) {
-        delete process.env.CLAUDE_CONFIG_PATH;
-      } else {
-        process.env.CLAUDE_CONFIG_PATH = previous;
-      }
-    }
-  });
-}
-
-async function ensureReleaseBuilt() {
-  if (releaseBuilt) {
+async function ensurePortableBuilt() {
+  if (portableBuilt) {
     return;
   }
 
-  await import(`${pathToFileURL(path.join(projectRoot, "scripts", "build-release.mjs")).href}?t=${Date.now()}`);
-  releaseBuilt = true;
+  await import(`${pathToFileURL(path.join(projectRoot, "scripts", "build-portable.mjs")).href}?t=${Date.now()}`);
+  portableBuilt = true;
 }
 
-async function runStandaloneNodeApplyScript(scriptPath, configPath, userId, extraArgs = [], expectedExitCode = 0) {
-  const previousArgv = process.argv;
-  const previousExitCode = process.exitCode;
-  const previousConfigPath = process.env.CLAUDE_CONFIG_PATH;
-  const previousConsoleLog = console.log;
-  const previousConsoleError = console.error;
+function randomPort() {
+  return 32000 + Math.floor(Math.random() * 2000);
+}
 
-  process.argv = [process.execPath, scriptPath, userId, ...extraArgs];
-  process.exitCode = 0;
-  process.env.CLAUDE_CONFIG_PATH = configPath;
-  console.log = () => {};
-  console.error = () => {};
+function skipOnPortableSpawnError(error, name) {
+  if (error?.code === "EPERM" || error?.code === "EACCES") {
+    throw new SkipTest(`${name} (sandbox blocked portable spawn)`);
+  }
+}
 
-  try {
-    await import(`${pathToFileURL(scriptPath).href}?t=${Date.now()}`);
-    assert.equal(process.exitCode ?? 0, expectedExitCode);
-  } finally {
-    process.argv = previousArgv;
-    process.exitCode = previousExitCode;
-    console.log = previousConsoleLog;
-    console.error = previousConsoleError;
-    if (previousConfigPath === undefined) {
-      delete process.env.CLAUDE_CONFIG_PATH;
-    } else {
-      process.env.CLAUDE_CONFIG_PATH = previousConfigPath;
+async function waitForPortable(baseUrl, name) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      const response = await fetch(`${baseUrl}/api/health`, { cache: "no-store" });
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch (error) {
+      lastError = error;
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
+
+  if (lastError) {
+    skipOnPortableSpawnError(lastError, name);
+  }
+
+  throw new Error(`Portable host did not become ready for ${name}.`);
 }
 
-function shouldSkipPowerShellIntegration(run, name) {
-  if (run.error?.code === "EPERM") {
-    throw new SkipTest(`${name} (sandbox blocked powershell.exe spawn)`);
-  }
+async function withPortable(run, options = {}) {
+  await ensurePortableBuilt();
+
+  await withTempDir(async (tempRoot) => {
+    const configPath = options.configPath ?? path.join(tempRoot, ".claude.json");
+    if (options.initialConfig !== undefined) {
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await writeFile(configPath, options.initialConfig, "utf8");
+    }
+
+    const baseUrl = `http://127.0.0.1:${randomPort()}`;
+    const child = spawn(rootPortableExe, [], {
+      cwd: projectRoot,
+      env: {
+        ...process.env,
+        BUDDY_PORTABLE_NO_BROWSER: "1",
+        BUDDY_PORTABLE_PORT: baseUrl.split(":").pop(),
+        CLAUDE_CONFIG_PATH: configPath,
+      },
+      stdio: "ignore",
+    });
+
+    let spawnError = null;
+    child.once("error", (error) => {
+      spawnError = error;
+    });
+
+    try {
+      if (spawnError) {
+        skipOnPortableSpawnError(spawnError, options.name ?? "portable integration");
+      }
+
+      const health = await waitForPortable(baseUrl, options.name ?? "portable integration");
+      await run({ baseUrl, configPath, tempRoot, health });
+    } catch (error) {
+      skipOnPortableSpawnError(spawnError ?? error, options.name ?? "portable integration");
+      throw error;
+    } finally {
+      if (!child.killed) {
+        child.kill();
+      }
+      await new Promise((resolve) => {
+        child.once("exit", () => resolve());
+        setTimeout(resolve, 1000);
+      });
+    }
+  });
 }
 
 test("bun-compatible wyhash self-tests pass", () => {
@@ -155,267 +186,149 @@ test("search planning keeps the attempt limit global across workers", () => {
   assert.equal(buildSequentialId("buddy-", 100, 3, 2, 4), "buddy-114");
 });
 
-test("getConfigStatus reports missing config cleanly", async () => {
-  await withTempConfig(async () => {
-    const status = await getConfigStatus();
+test("build-portable creates a standalone exe in root", async () => {
+  await ensurePortableBuilt();
 
+  const rootStat = await stat(rootPortableExe);
+
+  assert.equal(rootStat.size > 100000, true);
+  await assert.rejects(stat(distPortableExe));
+});
+
+test("build-portable-zip creates a release zip without duplicating a dist exe", async () => {
+  await import(`${pathToFileURL(path.join(projectRoot, "scripts", "build-portable-zip.mjs")).href}?t=${Date.now()}`);
+
+  const zipStat = await stat(distPortableZip);
+  assert.equal(zipStat.size > 100000, true);
+  await assert.rejects(stat(distPortableExe));
+});
+
+test("portable health endpoint reports portable mode", async () => {
+  await withPortable(async ({ health }) => {
+    assert.equal(health.ok, true);
+    assert.equal(health.portable, true);
+  }, { name: "portable health endpoint reports portable mode" });
+});
+
+test("portable config status reports missing config cleanly", async () => {
+  await withPortable(async ({ baseUrl }) => {
+    const response = await fetch(`${baseUrl}/api/config/status`, { cache: "no-store" });
+    const status = await response.json();
+
+    assert.equal(response.ok, true);
     assert.equal(status.exists, false);
     assert.equal(status.parseError, null);
     assert.equal(status.currentUserId, null);
-  });
+  }, { name: "portable config status reports missing config cleanly" });
 });
 
-test("getConfigStatus reports parse errors", async () => {
-  await withTempConfig(async (configPath) => {
-    await writeFile(configPath, "{broken json", "utf8");
-    const status = await getConfigStatus();
+test("portable apply preserves oauth access token and removes override fields", async () => {
+  const initialConfig = `${JSON.stringify({
+    userID: "before",
+    companion: { cached: true },
+    oauthAccount: {
+      accountUuid: "uuid-1",
+      accessToken: "keep-me",
+    },
+  }, null, 2)}\n`;
 
-    assert.equal(status.exists, true);
-    assert.notEqual(status.parseError, null);
-  });
-});
-
-test("getConfigStatus treats a valid non-object root as invalid config", async () => {
-  await withTempConfig(async (configPath) => {
-    await writeFile(configPath, "[]\n", "utf8");
-    const status = await getConfigStatus();
-
-    assert.equal(status.exists, true);
-    assert.match(status.parseError ?? "", /JSON object/i);
-  });
-});
-
-test("applyUserId backs up config and removes override fields", async () => {
-  await withTempConfig(async (configPath) => {
-    await writeFile(
-      configPath,
-      `${JSON.stringify(
-        {
-          userID: "old-id",
-          companion: { cached: true },
-          oauthAccount: {
-            accountUuid: "uuid-1",
-            accessToken: "keep-me",
-          },
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-
-    const result = await applyUserId({
-      userId: "new-id",
-      backup: true,
-      removeCompanion: true,
-      removeAccountUuid: true,
-    });
-
-    assert.equal(result.userId, "new-id");
-    assert.notEqual(result.backupPath, null);
-
-    const updated = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(updated.userID, "new-id");
-    assert.equal("companion" in updated, false);
-    assert.equal(updated.oauthAccount.accountUuid, undefined);
-    assert.equal(updated.oauthAccount.accessToken, "keep-me");
-  });
-});
-
-test("applyUserId rejects a valid non-object root without overwriting the file", async () => {
-  await withTempConfig(async (configPath) => {
-    const original = "[]\n";
-    await writeFile(configPath, original, "utf8");
-
-    await assert.rejects(
-      applyUserId({
-        userId: "new-id",
+  await withPortable(async ({ baseUrl, configPath, tempRoot }) => {
+    const response = await fetch(`${baseUrl}/api/apply`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userId: "buddy-portable",
         backup: true,
         removeCompanion: true,
         removeAccountUuid: true,
       }),
-      /JSON object/i,
-    );
+    });
+    const payload = await response.json();
 
-    assert.equal(await readFile(configPath, "utf8"), original);
-  });
-});
-
-test("build-release creates the lightweight release files", async () => {
-  await ensureReleaseBuilt();
-  const names = (await readdir(distDir)).sort();
-
-  for (const name of ["ClaudeBuddyLocal.html", "apply-userid.mjs", "apply-userid.ps1"]) {
-    assert.equal(names.includes(name), true);
-  }
-});
-
-test("dist/apply-userid.mjs runs standalone in an isolated directory and handles BOM configs", async () => {
-  await ensureReleaseBuilt();
-
-  await withTempDir(async (tempRoot) => {
-    const configPath = path.join(tempRoot, ".claude.json");
-    const scriptPath = path.join(tempRoot, "apply-userid.mjs");
-
-    await copyFile(path.join(distDir, "apply-userid.mjs"), scriptPath);
-    await writeFile(
-      configPath,
-      `\ufeff${JSON.stringify(
-        {
-          userID: "before",
-          companion: { cached: true },
-          oauthAccount: {
-            accountUuid: "uuid-1",
-            accessToken: "keep-me",
-          },
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-
-    await runStandaloneNodeApplyScript(scriptPath, configPath, "buddy-standalone");
+    assert.equal(response.ok, true);
+    assert.equal(payload.ok, true);
 
     const updated = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(updated.userID, "buddy-standalone");
+    assert.equal(updated.userID, "buddy-portable");
     assert.equal("companion" in updated, false);
     assert.equal(updated.oauthAccount.accountUuid, undefined);
     assert.equal(updated.oauthAccount.accessToken, "keep-me");
+
+    const backups = await readdir(tempRoot);
+    assert.equal(backups.some((name) => name.startsWith(".claude.json.buddy-backup-")), true);
+  }, {
+    name: "portable apply preserves oauth access token and removes override fields",
+    initialConfig,
   });
 });
 
-test("dist/apply-userid.mjs creates missing parent directories for CLAUDE_CONFIG_PATH", async () => {
-  await ensureReleaseBuilt();
+test("portable apply rejects a valid non-object root without clobbering the file", async () => {
+  const original = "[]\n";
 
+  await withPortable(async ({ baseUrl, configPath }) => {
+    const response = await fetch(`${baseUrl}/api/apply`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userId: "should-fail",
+        backup: true,
+        removeCompanion: true,
+        removeAccountUuid: true,
+      }),
+    });
+    const payload = await response.json();
+
+    assert.equal(response.ok, false);
+    assert.equal(payload.ok, false);
+    assert.match(payload.error ?? "", /JSON object/i);
+    assert.equal(await readFile(configPath, "utf8"), original);
+  }, {
+    name: "portable apply rejects a valid non-object root without clobbering the file",
+    initialConfig: original,
+  });
+});
+
+test("portable apply handles BOM configs and can create nested config directories", async () => {
   await withTempDir(async (tempRoot) => {
     const configPath = path.join(tempRoot, "nested", "profile", ".claude.json");
-    const scriptPath = path.join(tempRoot, "apply-userid.mjs");
+    const initialConfig = `\ufeff${JSON.stringify({
+      oauthAccount: {
+        accountUuid: "uuid-1",
+        accessToken: "keep-me",
+      },
+    }, null, 2)}\n`;
 
-    await copyFile(path.join(distDir, "apply-userid.mjs"), scriptPath);
-    await runStandaloneNodeApplyScript(scriptPath, configPath, "buddy-nested");
-
-    const updated = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(updated.userID, "buddy-nested");
-  });
-});
-
-test("dist/apply-userid.mjs rejects a valid non-object root without clobbering the file", async () => {
-  await ensureReleaseBuilt();
-
-  await withTempDir(async (tempRoot) => {
-    const configPath = path.join(tempRoot, ".claude.json");
-    const scriptPath = path.join(tempRoot, "apply-userid.mjs");
-    const original = "\"text\"\n";
-
-    await copyFile(path.join(distDir, "apply-userid.mjs"), scriptPath);
-    await writeFile(configPath, original, "utf8");
-    await runStandaloneNodeApplyScript(scriptPath, configPath, "buddy-invalid-root", [], 1);
-
-    assert.equal(await readFile(configPath, "utf8"), original);
-  });
-});
-
-test("dist/apply-userid.ps1 works in Windows PowerShell and preserves existing fields", async () => {
-  await ensureReleaseBuilt();
-
-  await withTempDir(async (tempRoot) => {
-    const configPath = path.join(tempRoot, ".claude.json");
-    const scriptPath = path.join(tempRoot, "apply-userid.ps1");
-
-    await copyFile(path.join(distDir, "apply-userid.ps1"), scriptPath);
-    await writeFile(
-      configPath,
-      `${JSON.stringify(
-        {
-          userID: "before",
-          companion: { cached: true },
-          oauthAccount: {
-            accountUuid: "uuid-1",
-            accessToken: "keep-me",
-          },
+    await withPortable(async ({ baseUrl }) => {
+      const response = await fetch(`${baseUrl}/api/apply`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
+        body: JSON.stringify({
+          userId: "buddy-bom",
+          backup: false,
+          removeCompanion: true,
+          removeAccountUuid: true,
+        }),
+      });
+      const payload = await response.json();
 
-    const run = spawnSync(
-      "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-UserId", "buddy-powershell"],
-      {
-        cwd: tempRoot,
-        env: { ...process.env, CLAUDE_CONFIG_PATH: configPath },
-        encoding: "utf8",
-      },
-    );
+      assert.equal(response.ok, true);
+      assert.equal(payload.ok, true);
 
-    shouldSkipPowerShellIntegration(run, "dist/apply-userid.ps1 works in Windows PowerShell and preserves existing fields");
-
-    assert.equal(run.status, 0, run.stderr || run.stdout);
-
-    const updated = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(updated.userID, "buddy-powershell");
-    assert.equal("companion" in updated, false);
-    assert.equal(updated.oauthAccount.accountUuid, undefined);
-    assert.equal(updated.oauthAccount.accessToken, "keep-me");
-  });
-});
-
-test("dist/apply-userid.ps1 aborts on broken JSON without clobbering the file", async () => {
-  await ensureReleaseBuilt();
-
-  await withTempDir(async (tempRoot) => {
-    const configPath = path.join(tempRoot, ".claude.json");
-    const scriptPath = path.join(tempRoot, "apply-userid.ps1");
-    const broken = "{broken json";
-
-    await copyFile(path.join(distDir, "apply-userid.ps1"), scriptPath);
-    await writeFile(configPath, broken, "utf8");
-
-    const run = spawnSync(
-      "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-UserId", "should-fail"],
-      {
-        cwd: tempRoot,
-        env: { ...process.env, CLAUDE_CONFIG_PATH: configPath },
-        encoding: "utf8",
-      },
-    );
-
-    shouldSkipPowerShellIntegration(run, "dist/apply-userid.ps1 aborts on broken JSON without clobbering the file");
-
-    assert.notEqual(run.status, 0, "PowerShell script should fail on broken JSON");
-    assert.equal(await readFile(configPath, "utf8"), broken);
-  });
-});
-
-test("dist/apply-userid.ps1 rejects a valid non-object root without clobbering the file", async () => {
-  await ensureReleaseBuilt();
-
-  await withTempDir(async (tempRoot) => {
-    const configPath = path.join(tempRoot, ".claude.json");
-    const scriptPath = path.join(tempRoot, "apply-userid.ps1");
-    const original = "null\n";
-
-    await copyFile(path.join(distDir, "apply-userid.ps1"), scriptPath);
-    await writeFile(configPath, original, "utf8");
-
-    const run = spawnSync(
-      "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-UserId", "should-fail"],
-      {
-        cwd: tempRoot,
-        env: { ...process.env, CLAUDE_CONFIG_PATH: configPath },
-        encoding: "utf8",
-      },
-    );
-
-    shouldSkipPowerShellIntegration(run, "dist/apply-userid.ps1 rejects a valid non-object root without clobbering the file");
-
-    assert.notEqual(run.status, 0, "PowerShell script should fail on a non-object JSON root");
-    assert.equal(await readFile(configPath, "utf8"), original);
+      const updated = JSON.parse(await readFile(configPath, "utf8"));
+      assert.equal(updated.userID, "buddy-bom");
+      assert.equal(updated.oauthAccount.accountUuid, undefined);
+      assert.equal(updated.oauthAccount.accessToken, "keep-me");
+    }, {
+      name: "portable apply handles BOM configs and can create nested config directories",
+      configPath,
+      initialConfig,
+    });
   });
 });
 

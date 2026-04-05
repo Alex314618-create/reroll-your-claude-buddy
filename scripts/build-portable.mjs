@@ -5,13 +5,14 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
-const desktopProject = path.join(projectRoot, "desktop", "ClaudeBuddyPortable", "ClaudeBuddyPortable.csproj");
-const buildDir = path.join(projectRoot, "build", "portable-publish");
-const dotnetHome = path.join(projectRoot, "build", "dotnet-home");
-const nugetPackages = path.join(projectRoot, "build", "nuget-packages");
+const cargoManifest = path.join(projectRoot, "native", "claude_buddy_portable", "Cargo.toml");
+const cargoTargetDir = path.join(projectRoot, "build", "cargo-target");
 const distDir = path.join(projectRoot, "dist");
-const portableDir = path.join(distDir, "portable");
 const rootPortableExe = path.join(projectRoot, "ClaudeBuddyLocalPortable.exe");
+const buildExe = path.join(cargoTargetDir, "release", "claude_buddy_portable.exe");
+const staleDistFiles = [
+  path.join(distDir, "ClaudeBuddyLocalPortable.exe"),
+];
 
 function cleanDir(target) {
   if (!existsSync(target)) {
@@ -30,51 +31,32 @@ function cleanDir(target) {
 }
 
 function main() {
-  cleanDir(buildDir);
-  cleanDir(portableDir);
-  mkdirSync(buildDir, { recursive: true });
-  mkdirSync(dotnetHome, { recursive: true });
-  mkdirSync(nugetPackages, { recursive: true });
-  mkdirSync(portableDir, { recursive: true });
+  for (const target of staleDistFiles) {
+    cleanDir(target);
+  }
+  mkdirSync(cargoTargetDir, { recursive: true });
+  mkdirSync(distDir, { recursive: true });
 
   execFileSync(
-    "dotnet",
+    "cargo",
     [
-      "publish",
-      desktopProject,
-      "-c",
-      "Release",
-      "-r",
-      "win-x64",
-      "--self-contained",
-      "true",
-      "-o",
-      buildDir,
-      "/p:RestoreIgnoreFailedSources=true",
-      "/p:NuGetAudit=false",
-      "/p:PublishSingleFile=true",
-      "/p:EnableCompressionInSingleFile=true",
-      "/p:DebugType=None",
-      "/p:DebugSymbols=false",
+      "build",
+      "--manifest-path",
+      cargoManifest,
+      "--release",
     ],
     {
       cwd: projectRoot,
       env: {
         ...process.env,
-        DOTNET_CLI_HOME: dotnetHome,
-        DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1",
-        NUGET_PACKAGES: nugetPackages,
+        CARGO_TARGET_DIR: cargoTargetDir,
       },
       stdio: "inherit",
     },
   );
 
-  const builtExe = path.join(buildDir, "ClaudeBuddyLocalPortable.exe");
-  const portableExe = path.join(portableDir, "ClaudeBuddyLocalPortable.exe");
-  cpSync(builtExe, portableExe);
-  cpSync(builtExe, rootPortableExe);
+  cpSync(buildExe, rootPortableExe);
 
-  console.log(`Built ${portableExe}`);
   console.log(`Updated ${rootPortableExe}`);
 }
 

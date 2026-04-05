@@ -3,13 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local-first Claude Code Buddy reroll tool with a browser UI and optional ~/.claude.json apply helper.",
+  "description": "Portable one-click Claude Buddy reroll tool with a local browser UI.",
   "scripts": {
     "build:portable": "node scripts/build-portable.mjs",
     "build:portable:zip": "node scripts/build-portable-zip.mjs",
-    "build:release": "node scripts/build-portable-zip.mjs",
-    "build:lite": "node scripts/build-release.mjs",
-    "build:lite:zip": "node scripts/build-zip.mjs",
     "test": "node test/buddy-core.test.mjs"
   },
   "engines": {

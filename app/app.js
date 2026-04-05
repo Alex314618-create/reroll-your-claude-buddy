@@ -213,11 +213,11 @@ function uiText(key) {
 }
 
 function primaryApplyButtonText() {
-  return state.portableMode ? t("apply.apply_selected") : uiText("copy_powershell_button");
+  return t("apply.apply_selected");
 }
 
 function secondaryApplyButtonText() {
-  return state.portableMode ? t("apply.copy_user_id") : uiText("copy_node_button");
+  return t("apply.copy_user_id");
 }
 
 function updateApplyButtons() {
@@ -281,6 +281,18 @@ function scheduleFinish(reason, callback) {
 }
 
 function showRollingFailure() {
+  if (hasImpossibleSearch()) {
+    rollingFeedback.innerHTML = `
+      <p class="telemetry-label">${escapeHtml(t("status.impossible"))}</p>
+      <div class="telemetry-value compact">${escapeHtml(t("telemetry.estimate_impossible"))}</div>
+      <p class="telemetry-copy">${escapeHtml(t("status.impossible_detail"))}</p>
+    `;
+    rollingFeedback.classList.remove("hidden");
+    returnAfterFailureButton.classList.remove("hidden");
+    renderTargetPanels();
+    return;
+  }
+
   const limitInput = document.querySelector("#limitInput");
   const currentLimit = clampNumber(limitInput.value, 1, Number.MAX_SAFE_INTEGER, 500000);
   const nextLimit = Math.min(Number.MAX_SAFE_INTEGER, currentLimit * 5);
@@ -581,6 +593,10 @@ function calculateMatchProbability(filters = collectFilters()) {
   return probability;
 }
 
+function hasImpossibleSearch(filters = collectFilters()) {
+  return calculateMatchProbability(filters) <= 0;
+}
+
 function expectedAttemptCount(filters = collectFilters(), count = collectSearchOptions().count) {
   const probability = calculateMatchProbability(filters);
   if (probability <= 0) {
@@ -645,6 +661,7 @@ function renderSearchEstimate() {
     estimateCards.forEach((card) => {
       card.innerHTML = html;
     });
+    updateSearchControls(filters);
     return;
   }
 
@@ -656,6 +673,7 @@ function renderSearchEstimate() {
   estimateCards.forEach((card) => {
     card.innerHTML = html;
   });
+  updateSearchControls(filters);
 }
 
 function renderProgress() {
@@ -703,35 +721,28 @@ function statCard(name, value) {
 }
 
 function renderConfigSummary() {
-  if (state.portableMode) {
-    const status = state.configStatus;
-    const statusText = !status
+  const status = state.configStatus;
+  const statusText = !state.portableMode
+    ? t("apply.status_unavailable")
+    : !status
       ? t("apply.status_loading")
       : status.parseError
         ? t("apply.status_error")
         : status.exists
           ? t("apply.status_ready")
           : t("apply.status_missing");
-
-    configSummary.innerHTML = `
-      <div class="fact-grid">
-        ${buildFactCard(uiText("runtime_mode"), uiText("runtime_mode_portable"))}
-        ${buildFactCard(uiText("config_status"), statusText)}
-        ${buildFactCard(uiText("script_config"), `<span class="mono">${escapeHtml(status?.configPath ?? "~/.claude.json")}</span>`, true)}
-        ${buildFactCard(uiText("current_user_id"), status?.currentUserId ? `<span class="mono">${escapeHtml(status.currentUserId)}</span>` : t("status.progress_none"), true)}
-        ${buildFactCard(uiText("script_backup"), document.querySelector("#backupInput").checked ? t("apply.shiny_yes") : t("apply.shiny_no"))}
-        ${buildFactCard(uiText("script_remove_companion"), document.querySelector("#removeCompanionInput").checked ? t("apply.shiny_yes") : t("apply.shiny_no"))}
-        ${buildFactCard(uiText("script_remove_account_uuid"), document.querySelector("#removeAccountUuidInput").checked ? t("apply.shiny_yes") : t("apply.shiny_no"))}
-      </div>
-    `;
-    return;
-  }
-
+  const configPathValue = state.portableMode
+    ? `<span class="mono">${escapeHtml(status?.configPath ?? "~/.claude.json")}</span>`
+    : escapeHtml(t("apply.launch_portable"));
+  const userIdValue = state.portableMode && status?.currentUserId
+    ? `<span class="mono">${escapeHtml(status.currentUserId)}</span>`
+    : escapeHtml(state.portableMode ? t("status.progress_none") : t("apply.host_missing"));
   configSummary.innerHTML = `
     <div class="fact-grid">
-      ${buildFactCard(uiText("script_name"), `<span class="mono">apply-userid.ps1</span>`, true)}
-      ${buildFactCard(uiText("script_mode"), uiText("script_mode_value"))}
-      ${buildFactCard(uiText("script_config"), `<span class="mono">~/.claude.json</span>`, true)}
+      ${buildFactCard(uiText("runtime_mode"), state.portableMode ? uiText("runtime_mode_portable") : uiText("runtime_mode_missing"))}
+      ${buildFactCard(uiText("config_status"), statusText)}
+      ${buildFactCard(uiText("script_config"), configPathValue, true)}
+      ${buildFactCard(uiText("current_user_id"), userIdValue, true)}
       ${buildFactCard(uiText("script_backup"), document.querySelector("#backupInput").checked ? t("apply.shiny_yes") : t("apply.shiny_no"))}
       ${buildFactCard(uiText("script_remove_companion"), document.querySelector("#removeCompanionInput").checked ? t("apply.shiny_yes") : t("apply.shiny_no"))}
       ${buildFactCard(uiText("script_remove_account_uuid"), document.querySelector("#removeAccountUuidInput").checked ? t("apply.shiny_yes") : t("apply.shiny_no"))}
@@ -870,10 +881,14 @@ function createSearchWorker() {
   return new Worker("./search-worker.js", { type: "module" });
 }
 
+function updateSearchControls(filters = collectFilters()) {
+  runButton.disabled = state.isSearching || hasImpossibleSearch(filters);
+  stopButton.disabled = !state.isSearching;
+}
+
 function setSearching(searching) {
   state.isSearching = searching;
-  runButton.disabled = searching;
-  stopButton.disabled = !searching;
+  updateSearchControls();
 }
 
 function haltWorkers() {
@@ -930,10 +945,18 @@ function maybeFinishSearch() {
 }
 
 function startSearch() {
+  const filters = collectFilters();
+  if (hasImpossibleSearch(filters)) {
+    hideRollingFeedback();
+    showView("setup");
+    renderStatus(t("status.impossible"), true);
+    updateSearchControls(filters);
+    return;
+  }
+
   resetSearchState();
   hideRollingFeedback();
   state.searchStartedAt = performance.now();
-  const filters = collectFilters();
   const options = collectSearchOptions();
   const workerCount = getEffectiveWorkerCount(options.workers, options.limit);
   setSearching(true);
@@ -1007,40 +1030,14 @@ function selectedBuddy() {
   return state.results.find((item) => item.userId === state.selectedUserId) ?? null;
 }
 
-function quotePowerShellLiteral(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
-
-function buildPowerShellCommand(userId) {
-  const flags = [];
-  if (!document.querySelector("#backupInput").checked) flags.push("-NoBackup");
-  if (!document.querySelector("#removeCompanionInput").checked) flags.push("-KeepCompanion");
-  if (!document.querySelector("#removeAccountUuidInput").checked) flags.push("-KeepAccountUuid");
-
-  return [
-    "powershell.exe",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    ".\\apply-userid.ps1",
-    "-UserId",
-    quotePowerShellLiteral(userId),
-    ...flags,
-  ].join(" ");
-}
-
-function buildNodeCommand(userId) {
-  const flags = [];
-  if (!document.querySelector("#backupInput").checked) flags.push("--no-backup");
-  if (!document.querySelector("#removeCompanionInput").checked) flags.push("--keep-companion");
-  if (!document.querySelector("#removeAccountUuidInput").checked) flags.push("--keep-account-uuid");
-
-  return ["node", ".\\apply-userid.mjs", quotePowerShellLiteral(userId), ...flags].join(" ");
-}
-
 async function applySelectedBuddy() {
   const selected = selectedBuddy();
   if (!selected) {
+    return;
+  }
+
+  if (!state.portableMode) {
+    renderConfigLog(t("status.runtime_missing"), true);
     return;
   }
 
@@ -1089,13 +1086,6 @@ async function copyTextWithFallback(value, { successMessage, promptText }) {
   renderConfigLog(uiText("copy_manual"), true);
 }
 
-async function copyCommand(command, messageKey) {
-  await copyTextWithFallback(command, {
-    successMessage: uiText(messageKey),
-    promptText: uiText("prompt_copy_command"),
-  });
-}
-
 function installInputRerenderHandlers() {
   const rerender = () => {
     renderTargetPanels();
@@ -1138,7 +1128,10 @@ async function initializeRuntimeMode() {
   if (state.portableMode) {
     startPortablePing();
     await refreshConfigStatus();
+    return;
   }
+
+  renderStatus(t("status.runtime_missing"), true);
 }
 
 function boot() {
@@ -1182,12 +1175,7 @@ function boot() {
       return;
     }
 
-    if (state.portableMode) {
-      void applySelectedBuddy();
-      return;
-    }
-
-    void copyCommand(buildPowerShellCommand(state.selectedUserId), "copied_powershell");
+    void applySelectedBuddy();
   });
 
   copyNodeButton.addEventListener("click", () => {
@@ -1195,15 +1183,10 @@ function boot() {
       return;
     }
 
-    if (state.portableMode) {
-      void copyTextWithFallback(state.selectedUserId, {
-        successMessage: formatMessage("status.copied", { userId: state.selectedUserId }),
-        promptText: uiText("prompt_copy_user_id"),
-      });
-      return;
-    }
-
-    void copyCommand(buildNodeCommand(state.selectedUserId), "copied_node");
+    void copyTextWithFallback(state.selectedUserId, {
+      successMessage: formatMessage("status.copied", { userId: state.selectedUserId }),
+      promptText: uiText("prompt_copy_user_id"),
+    });
   });
 
   void initializeRuntimeMode();
