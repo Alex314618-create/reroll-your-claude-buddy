@@ -1,8 +1,7 @@
 using System.Diagnostics;
+using System.Windows.Forms;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.StaticFiles;
-using Microsoft.Extensions.FileProviders;
 
 namespace ClaudeBuddyPortable;
 
@@ -17,30 +16,27 @@ internal static class Program
         }
         catch (Exception error)
         {
+            var logPath = Path.Combine(AppContext.BaseDirectory, "portable-error.log");
             File.WriteAllText(
-                Path.Combine(AppContext.BaseDirectory, "portable-error.log"),
+                logPath,
                 $"{DateTime.UtcNow:O}{Environment.NewLine}{error}{Environment.NewLine}"
             );
-            ShowError($"Portable 启动失败，请查看：{Path.Combine(AppContext.BaseDirectory, "portable-error.log")}");
+            ShowError($"Portable failed to start.\n\nSee:\n{logPath}");
         }
     }
 
     private static async Task RunAsync(string[] args)
     {
-        var appRoot = Path.Combine(AppContext.BaseDirectory, "app");
-        if (!Directory.Exists(appRoot))
+        var embeddedAssets = EmbeddedAppAssets.Load();
+        if (!embeddedAssets.HasIndex)
         {
-            ShowError(
-                "Portable 资源目录缺失，找不到 app 文件夹。\n\n请重新解压完整的 Portable 压缩包后再双击运行。"
-            );
+            ShowError("Portable app assets are missing from this build.");
             return;
         }
 
         var baseUrl = $"http://127.0.0.1:{FindAvailablePort()}";
         var lastActivity = DateTime.UtcNow;
         var configStore = new ConfigStore();
-        var fileProvider = new PhysicalFileProvider(appRoot);
-        var contentTypes = new FileExtensionContentTypeProvider();
 
         var builder = WebApplication.CreateSlimBuilder(args);
         builder.WebHost.UseKestrel();
@@ -86,7 +82,7 @@ internal static class Program
         app.MapGet("/{**path}", async (HttpContext context) =>
         {
             var relativePath = NormalizeRelativePath(context.Request.Path.Value);
-            if (!TryReadStaticFile(fileProvider, contentTypes, relativePath, out var contentType, out var bytes))
+            if (!embeddedAssets.TryRead(relativePath, out var contentType, out var bytes))
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 return;
@@ -127,35 +123,6 @@ internal static class Program
         return requestPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
     }
 
-    private static bool TryReadStaticFile(
-        IFileProvider fileProvider,
-        FileExtensionContentTypeProvider contentTypes,
-        string relativePath,
-        out string contentType,
-        out byte[] bytes)
-    {
-        var fileInfo = fileProvider.GetFileInfo(relativePath);
-        if (!fileInfo.Exists)
-        {
-            contentType = "application/octet-stream";
-            bytes = Array.Empty<byte>();
-            return false;
-        }
-
-        if (!contentTypes.TryGetContentType(relativePath, out var resolvedContentType))
-        {
-            resolvedContentType = "application/octet-stream";
-        }
-
-        contentType = resolvedContentType;
-
-        using var stream = fileInfo.CreateReadStream();
-        using var memory = new MemoryStream();
-        stream.CopyTo(memory);
-        bytes = memory.ToArray();
-        return true;
-    }
-
     private static void OpenBrowser(string url)
     {
         try
@@ -168,13 +135,13 @@ internal static class Program
         }
         catch
         {
-            ShowError($"浏览器没有自动打开，请手动访问：\n\n{url}");
+            ShowError($"Browser did not open automatically.\n\nOpen this URL manually:\n{url}");
         }
     }
 
     private static void ShowError(string message)
     {
-        MessageBox.Show(message, "Claude Buddy Local Portable");
+        MessageBox.Show(message, "Claude Buddy Local Portable", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 
     private static int FindAvailablePort()

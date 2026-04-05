@@ -11,6 +11,7 @@ const dotnetHome = path.join(projectRoot, "build", "dotnet-home");
 const nugetPackages = path.join(projectRoot, "build", "nuget-packages");
 const distDir = path.join(projectRoot, "dist");
 const portableDir = path.join(distDir, "portable");
+const rootPortableExe = path.join(projectRoot, "ClaudeBuddyLocalPortable.exe");
 
 function cleanDir(target) {
   if (!existsSync(target)) {
@@ -68,10 +69,13 @@ function main() {
     },
   );
 
-  cpSync(path.join(buildDir, "ClaudeBuddyLocalPortable.exe"), path.join(portableDir, "ClaudeBuddyLocalPortable.exe"));
-  cpSync(path.join(projectRoot, "app"), path.join(portableDir, "app"), { recursive: true });
+  const builtExe = path.join(buildDir, "ClaudeBuddyLocalPortable.exe");
+  const portableExe = path.join(portableDir, "ClaudeBuddyLocalPortable.exe");
+  cpSync(builtExe, portableExe);
+  cpSync(builtExe, rootPortableExe);
 
-  console.log(`Built ${path.join(portableDir, "ClaudeBuddyLocalPortable.exe")}`);
+  console.log(`Built ${portableExe}`);
+  console.log(`Updated ${rootPortableExe}`);
 }
 
 main();

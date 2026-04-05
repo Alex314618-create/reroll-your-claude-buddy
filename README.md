@@ -1,105 +1,86 @@
-# Claude Buddy Local
+# Reroll Your Claude Buddy
 
-面向小白的 Claude Buddy Portable 一键版。
+## 中文
 
-现在的主发布形态是 Windows Portable：
+一个面向普通用户的 Claude Buddy 本地工具。
 
-- 双击 `ClaudeBuddyLocalPortable.exe`
-- 自动打开本地页面
-- 直接筛选、搜索、选中、应用
-- 不需要再复制命令或手动打开 PowerShell
+它的重点不是命令行，不是复杂配置，而是：
 
-## 这是什么
+- 一键启动
+- 更好看的界面
+- 全自动流程
 
-这是一个本地优先的 Claude Buddy 筛选和 reroll 工具。
+你只需要：
 
-你可以：
+1. 下载发布页里的 `ClaudeBuddyLocalPortable.exe` 或 `ClaudeBuddyLocalPortable.zip`
+2. 双击启动
+3. 选择你想要的 Buddy 外观
+4. 等它自动搜索
+5. 选中结果并直接应用
 
-1. 按物种、稀有度、眼睛、帽子、闪光来筛选 buddy
-2. 从结果列表里选中自己想要的 buddy
-3. 在页面内直接把对应 `userID` 写入本机 `~/.claude.json`
+整个主流程都在界面里完成。
+不需要自己手动跑脚本，也不需要理解复杂参数。
 
-## 当前推荐版本
+### 这是什么
 
-推荐直接使用 Portable 版。
+这是一个本地优先的 Claude Buddy reroll 工具。
 
-Portable 压缩包解压后会包含：
+它支持：
+
+- 按物种、稀有度、眼睛、帽子、闪光筛选
+- 自动搜索匹配结果
+- 在页面里直接应用选中的 Buddy
+- 便携式启动，不需要安装器
+
+### 为什么用它
+
+- 一键启动：双击就开
+- 设计更完整：不是简单工具页，而是完整流程界面
+- 自动化更强：搜索、重试、应用都尽量在页面里完成
+- 本地优先：不会把你的配置写入远端服务
+
+### 当前推荐发布方式
+
+推荐直接使用 Portable 版本。
+
+发布物：
 
 - `ClaudeBuddyLocalPortable.exe`
-- `app/` 目录
+- `ClaudeBuddyLocalPortable.zip`
 
-注意：
+如果你下载的是 zip：
 
-- `exe` 和 `app/` 目录必须放在一起
-- 用户应解压整个 zip，再双击 `ClaudeBuddyLocalPortable.exe`
-
-## 小白使用方式
-
-1. 解压 Portable 压缩包
+1. 解压 zip
 2. 双击 `ClaudeBuddyLocalPortable.exe`
-3. 等它自动打开页面
-4. 搜索并选中一个 buddy
-5. 点击“一键应用当前 Buddy”
 
-## 前置条件
+### 使用前提
 
-如果你希望写入的 `userID` 真正作用到 Claude Code Buddy，请先完成 Claude Code 自己的 token 配置流程：
+如果你希望写入后的 `userID` 真正对 Claude Code 生效，请先完成 Claude Code 自己的认证配置流程：
 
 1. 设置 `CLAUDE_CODE_OAUTH_TOKEN`
 2. 运行 `claude setup-token`
 3. 确认系统已经生成 `~/.claude.json`
 
-## 构建 Portable
+### 适用平台
 
-主构建命令：
+- 当前主发布线是 Windows Portable
+- 目标用户是想直接双击使用的人
+
+### 本地构建
+
+构建 Portable：
 
 ```powershell
 npm.cmd run build:portable
 ```
 
-会输出：
-
-```text
-dist\portable\ClaudeBuddyLocalPortable.exe
-dist\portable\app\...
-```
-
-打包 Portable zip：
+打包 zip：
 
 ```powershell
 npm.cmd run build:portable:zip
 ```
 
-或者：
-
-```powershell
-npm.cmd run build:release
-```
-
-会输出：
-
-```text
-dist\ClaudeBuddyLocalPortable.zip
-```
-
-## 平台说明
-
-- 当前 Portable 主线是 Windows-only
-- `build:portable:zip` 目前依赖 `powershell.exe`
-- 如果以后要接跨平台 CI，再把 zip 打包改成纯 Node 即可
-
-## 旧的 Lite 构建
-
-仓库里仍然保留了旧的轻量 HTML 方案，主要用于开发和回退，不再是主发布方式。
-
-可选命令：
-
-```powershell
-npm.cmd run build:lite
-npm.cmd run build:lite:zip
-```
-
-## 测试
+### 测试
 
 ```powershell
 npm.cmd test
@@ -108,20 +89,110 @@ npm.cmd test
 当前测试覆盖：
 
 - hash 自检
-- roll 的 deterministic 行为
+- roll 的确定性行为
 - filters 逻辑
-- 全局 attempt limit 分配逻辑
-- 配置缺失
-- 配置损坏 JSON
-- 合法但非对象根节点的 JSON 配置
-- Node 配置写入、备份和字段清理
-- BOM 前缀 JSON 配置
-- `CLAUDE_CONFIG_PATH` 指向不存在父目录时的写入行为
-- `dist/apply-userid.mjs` 在隔离目录独立运行
-- `dist/apply-userid.ps1` 在允许调用 Windows PowerShell 的环境下验证写配置
-- `dist/apply-userid.ps1` 遇到损坏 JSON 时不会覆盖原文件
-- `dist/apply-userid.ps1` 遇到合法但非对象根节点时不会覆盖原文件
+- 全局 attempt limit 分配
+- 配置读取与写入
+- 非法 JSON / 非对象根节点保护
+- Node helper 独立运行
+- PowerShell helper 在允许环境中的集成验证
 
 说明：
 
 - 如果当前环境禁止测试进程拉起 `powershell.exe`，PowerShell 集成项会显示为 `SKIP`
+
+---
+
+## English
+
+A local-first Claude Buddy reroll tool built for normal users.
+
+The goal is simple:
+
+- one-click launch
+- polished interface
+- automated flow
+
+You should be able to:
+
+1. Download `ClaudeBuddyLocalPortable.exe` or `ClaudeBuddyLocalPortable.zip` from Releases
+2. Double-click to open
+3. Choose the Buddy look you want
+4. Let the app search automatically
+5. Select a result and apply it directly
+
+The main flow stays inside the UI.
+No manual scripting should be required for normal use.
+
+### What It Does
+
+This is a local Claude Buddy reroll tool that supports:
+
+- filtering by species, rarity, eyes, hat, and shiny state
+- automatic local search
+- direct apply from the page
+- portable startup without an installer
+
+### Why This Version
+
+- One-click launch
+- Better visual design
+- More automated UX
+- Local-first config handling
+
+### Recommended Release
+
+Use the Portable release.
+
+Release assets:
+
+- `ClaudeBuddyLocalPortable.exe`
+- `ClaudeBuddyLocalPortable.zip`
+
+If you download the zip:
+
+1. Extract it
+2. Double-click `ClaudeBuddyLocalPortable.exe`
+
+### Prerequisite
+
+If you want the written `userID` to actually take effect in Claude Code, complete Claude Code's own auth setup first:
+
+1. Set `CLAUDE_CODE_OAUTH_TOKEN`
+2. Run `claude setup-token`
+3. Make sure `~/.claude.json` exists
+
+### Platform
+
+- Windows Portable is the main release line
+
+### Build
+
+Build Portable:
+
+```powershell
+npm.cmd run build:portable
+```
+
+Build zip:
+
+```powershell
+npm.cmd run build:portable:zip
+```
+
+### Test
+
+```powershell
+npm.cmd test
+```
+
+Current coverage includes:
+
+- hash self-tests
+- deterministic reroll behavior
+- filter matching
+- global attempt-limit distribution
+- config read/write safety
+- invalid JSON and non-object root handling
+- standalone Node helper validation
+- PowerShell helper integration in allowed environments
