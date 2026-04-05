@@ -1,0 +1,7 @@
+.npm-cache/
+build/
+dist/
+desktop/**/bin/
+desktop/**/obj/
+node_modules/
+temp_release_check*/

@@ -1,0 +1,15 @@
+{
+  "name": "claude-buddy-local",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first Claude Code Buddy reroll tool with a browser UI and optional ~/.claude.json apply helper.",
+  "scripts": {
+    "build:release": "node scripts/build-release.mjs",
+    "build:zip": "node scripts/build-zip.mjs",
+    "test": "node test/buddy-core.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
